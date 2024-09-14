@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "src/freeos_swap_backend"
+]
+resolver = "2"

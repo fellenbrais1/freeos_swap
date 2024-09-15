@@ -1,5 +1,11 @@
 [workspace]
 members = [
-    "src/freeos_swap_backend"
+    "src/freeos_swap"
 ]
 resolver = "2"
+
+ic_principal = "0.1.1"
+candid = "0.10.10"
+ic-cdk = "0.16.0"
+serde = { version = "1.0.210", features = ["derive"] }
+ic-cdk-macros = "0.16.0"

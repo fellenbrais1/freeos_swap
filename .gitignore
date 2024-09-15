@@ -7,19 +7,32 @@
 .DS_Store
 **/.DS_Store
 
-# dfx temporary files
-.dfx/
+# Ignore dfx generated files and build artifacts
+/.dfx/
+/canister_ids.json
+/canisters/
 
-# generated files
-**/declarations/
+# Ignore VSCode config
+.vscode/
 
-# rust
+# Ignore macOS system files
+.DS_Store
+
+# Ignore temporary files
+*.log
+*.tmp
+
+# Ignore IDE/editor specific files
+.idea/
+*.iml
+
+# Ignore generated documentation
+/docs/
+
+# Ignore build directories (if you have any custom build steps)
+dist/
+build/
+out/
 target/
 
-# frontend code
-node_modules/
-dist/
-.svelte-kit/
-
-# environment variables
-.env
+.mops

@@ -1,15 +1,26 @@
 {
   "canisters": {
-    "freeos_swap_backend": {
-      "candid": "src/freeos_swap_backend/freeos_swap_backend.did",
-      "package": "freeos_swap_backend",
+    "freeos_swap": {
+      "candid": "src/freeos_swap/freeos_swap.did",
+      "package": "freeos_swap",
       "type": "rust"
+    },
+    "icrc1_ledger": {
+      "type": "custom",
+      "candid": "src/lift/icrc1_ledger.did",
+      "wasm": "src/lift/icrc1_ledger.wasm.gz"
     }
   },
   "defaults": {
     "build": {
       "args": "",
       "packtool": ""
+    }
+  },
+  "networks": {
+    "local": {
+      "bind": "127.0.0.1:8000",
+      "type": "ephemeral"
     }
   },
   "output_env_file": ".env",

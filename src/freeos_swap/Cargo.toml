@@ -1,5 +1,5 @@
 [package]
-name = "freeos_swap_backend"
+name = "freeos_swap"
 version = "0.1.0"
 edition = "2021"
 
@@ -9,6 +9,10 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
+blob = "0.3.0"
 candid = "0.10"
 ic-cdk = "0.16"
 ic-cdk-timers = "0.10" # Feel free to remove this dependency if you don't need timers
+ic_principal = "0.1.1"
+serde = "1.0.210"
+whoami = "1.5.2"

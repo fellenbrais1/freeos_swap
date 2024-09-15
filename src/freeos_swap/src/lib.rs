@@ -38,6 +38,7 @@ use ic_cdk::*;
 use ic_cdk::api::call::call_raw;
 use std::convert::TryInto;
 use ic_cdk::storage;
+// use std::sync::LazyLock;
 
 // TYPES *************************************************************
 
@@ -265,9 +266,16 @@ fn main() {
     // let mut transfer_amount: Tokens = 50000;
     // let mut transfer_fee: Tokens = 0;
     
+    // This doesn't fucking work either
     // Get the Principal of this canister for use in burning
-    // private let minterPrincipal : Principal = Principal.fromText("aaaaa-aa"); // Principal of the current canister
-    // static mut MINTER_PRINCIPAL: Principal = Principal::from_text("bkyz2-fmaaa-aaaaa-qaaaq-cai").unwrap();
+    // const MINTER_PRINCIPAL_STRING: &str = "aaaaa-aa"; // Principal of the current canister
+    // static mut MINTER_PRINCIPAL: Principal = Principal::from_text(MINTER_PRINCIPAL_STRING).expect("Something went wrong");
+
+    // Of course this doesn't work because it fucks up all of the other types
+    // const MINTER_PRINCIPAL_STRING: &str = "aaaaa-aa"; // Principal of the current canister
+    // static MINTER_PRINCIPAL: LazyLock<Principal> = LazyLock::new(|| {
+    //     Principal::from_text(MINTER_PRINCIPAL_STRING).expect("Something went wrong")
+    // });
     
     // Creating the account type variable to use in the burn() function
     // static mut MINTER_ACCOUNT: Account = Account { 

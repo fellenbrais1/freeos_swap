@@ -4,4 +4,5 @@ service : {
     "set_fee": (nat64) -> (nat64);
     "show_transfer_amount": () -> (nat64) query;
     "show_transfer_fee": () -> (nat64) query;
+    "get_my_struct": (SendInfo) -> (SendInfo);
 }

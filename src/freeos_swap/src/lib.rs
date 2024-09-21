@@ -1,44 +1,22 @@
 // lib.rs
-// Code to run and manage processes handled by the freeos_swap canister working with the icrc1_ledger canister
-
-// TODO
-// Add the freeos_swap actor ID and mint function call to the freeos_manager canister so mint can be called from the manager using the minter
-// Also add the timer function calls etc. as necessary so freeos_swap has all it needs to function
-// Take out functions from freeos_swap that are only going to be called using freeos_maanger
-// Test the auto-burning and auto-minting functions again once the above are done
-
-// NOTES
-// At the moment the mint function can only be called from the freeos_swap canister
-// The burn function can only be called from freeos_manager by specifying the Principal of the account to burn from
+// Clean version of work in progresss
 
 // CODE START
 
-// import Principal "mo:base/Principal";
-// import Blob "mo:base/Blob";
-// import Int "mo:base/Int";
-// import Nat "mo:base/Nat";
-// import Nat64 "mo:base/Nat64";
-// import Text "mo:base/Text";
-// import Error "mo:base/Error";
-// import Time "mo:base/Time";
-// import Timer "mo:base/Timer";
-// import Debug "mo:base/Debug";
-// import Result "mo:base/Result";
-
-// import {JSON; Candid; CBOR;} "mo:serde"; 
-// import UrlEncoded "mo:serde";
-
 //IMPORTS ************************************************************
 
+use api::management_canister::bitcoin::GetCurrentFeePercentilesRequest;
 use candid::{CandidType, Nat, Principal};
 use serde::Deserialize;
 use blob::Blob;
 use std::cell::RefCell;
+use std::f32::MIN;
+use std::mem::transmute;
+use std::str::FromStr;
 use ic_cdk::*;
 use ic_cdk::api::call::call_raw;
 use std::convert::TryInto;
 use ic_cdk::storage;
-// use std::sync::LazyLock;
 
 // TYPES *************************************************************
 
@@ -47,22 +25,34 @@ type Tokens = u64;
 type Timestamp = u64;
 type BlockIndex = u64;
 
-static mut TRANSFER_AMOUNT: Option<Tokens> = None;
-static mut TRANSFER_FEE: Option<Tokens> = None;
-
 // Custom type for the generation of Timestamp values
 type Time = u64;
 
-#[derive(Clone, Debug, CandidType, Deserialize)]
-struct Account {
-    owner: Principal,
-    subaccount: Option<[u8; 32]>,
+const INITIAL_TRANSFER_AMOUNT: Tokens = 50000;
+const INITIAL_TRANSFER_FEE: Tokens = 0;
+
+// Defines the to_principal value here to make it easier to update and be used
+// Identity: Jesper
+const INITIAL_TO_PRINCIPAL_STRING: &str = "tog4r-6yoqs-piw5o-askmx-dwu6g-vncjf-y7gml-qnkb2-yhuao-2cq3c-2ae.";
+// Identity: testytester
+// const INITIAL_TO_PRINCIPAL_STRING: &str = "stp67-22vw7-sgmm7-aqsla-64hid-auh7e-qjsxr-tr3q2-47jtb-qubd7-6qe";
+
+#[derive(Clone, Debug, CandidType, serde::Deserialize)]
+pub struct SendInfo {
+    proton_account: String,
+    ic_principal: Principal,
+    amount: u64,
+    utc_time: u64,
 }
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
-enum Result<Ok, Err> {
-    Ok(Ok),
-    Err(Err),
+struct TimerObject {
+    mint_timer: u64,
+    is_minting: bool,
+    mint_stop: bool,  
+    burn_timer: u64,
+    id_burning: bool,
+    burn_stop: bool,
 }
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
@@ -74,23 +64,15 @@ struct TransferArg {
     memo: Option<Vec<u8>>,
     created_at_time: Option<u64>,
 }
-
 #[derive(Clone, Debug, CandidType, Deserialize)]
-enum TransferError {
-    BadFee { expected_fee: Nat },
-    BadBurn { min_burn_amount: Nat },
-    InsufficientFunds { balance: Nat },
-    TooOld,
-    CreatedInFuture { ledger_time: u64 },
-    TemporarilyUnavailable,
-    Duplicate { duplicate_of: Nat },
-    GenericError { error_code: Nat, message: String },
+struct Account {
+    owner: Principal,
+    subaccount: Option<[u8; 32]>,
 }
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
-enum TransferResult {
-    Ok(Nat),
-    Err(TransferError),
+struct GreetingParams {
+    to_principal: Principal,
 }
 
 // JSON - New custom type to create JSON records
@@ -107,16 +89,42 @@ pub struct LedgerClient {
     canister_id: Principal,
 }
 
+#[derive(Clone, Debug, CandidType, Deserialize)]
+enum TransferResult {
+    Ok(Nat),
+    Err(TransferError),
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+enum Result<Ok, Err> {
+    Ok(Ok),
+    Err(Err),
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+enum CustomResult {
+    Ok (u64),
+    Err(String),
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+enum TransferError {
+    BadFee { expected_fee: Nat },
+    BadBurn { min_burn_amount: Nat },
+    InsufficientFunds { balance: Nat },
+    TooOld,
+    CreatedInFuture { ledger_time: u64 },
+    TemporarilyUnavailable,
+    Duplicate { duplicate_of: Nat },
+    GenericError { error_code: Nat, message: String },
+}
+
 // Holds the value of the ledger_client
 thread_local! {
     static LEDGER_CLIENT: RefCell<Option<LedgerClient>> = RefCell::new(None);
 }
 
-#[derive(CandidType, Deserialize)]
-struct GreetingParams {
-    to_principal: Principal,
-}
-
+// JESPER - Not sure if needed?
 #[update]
 async fn greet_other_canister(ledger_canister_id: Principal, to_principal: Principal) -> String {
     let args = GreetingParams { to_principal };
@@ -136,76 +144,8 @@ async fn greet_other_canister(ledger_canister_id: Principal, to_principal: Princ
         }
     }
 }
-// FUCK OFF
-// impl LedgerClient {
-//     fn new(canister_id: Principal) -> Self {
-//         Self { canister_id }
-//     }
-
-//     #[ic_cdk::query]
-//     pub async fn balance_of(Self::canister_id: Principal, account: Account) -> Result<Nat, String> {
-//         LedgerClient::balance_of();
-//         LEDGER_CLIENT.with(|c| {
-//             c.set(c.get() + account.value);
-//         });
-//     }
-
-    // pub async fn balance_of(&self, account: Account) -> Result<Nat, String> {
-    //     let call_result: CallResult<(BalanceResult,)> = call::call(self.canister_id, "icrc1_balance_of", (account,)).await;
-    //     match call_result {
-    //         Ok((balance_result,)) => {
-    //             match balance_result.balance {
-    //                 Ok(balance) => Ok(balance),
-    //                 Err(e) => Err(format!("Error fetching balance: {:?}", e)),
-    //             }
-    //             let balance = call_result;
-    //             return Ok(balance,);
-    //         }S
-    //         Err(e) => {
-    //             return Err(format!("Error calling icrc1_balance_of: {:?}", e));
-    //         }
-    //     }
-    // }
-// }
-
 
 // FUNCTIONS *************************************************************
-
-// Changes the amount that is transferred in minting/ burning etc.
-// Can be called by the user
-// #[ic_cdk::update]
-// pub fn set_transfer_amount(amount: u64) -> u64 {
-//     let transfer_amount = amount;
-//     return transfer_amount;
-// }
-
-// #[ic_cdk::query]
-// pub fn show_transfer_amount() -> u64 {
-//     return transfer_amount;
-// }
-
-// // Changes the fee exacted on a transaction (default is 0).
-// // Can be called by the user\
-// #[ic_cdk::update]
-// pub fn set_fee(amount: u64) -> u64 {
-//     let transfer_fee = amount;
-//     return transfer_fee;
-// }
-
-// #[ic_cdk::query]
-// pub fn show_fee() -> u64 {
-//     return transfer_fee;
-// }
-
-
-// Prints the Principal of the caller, this can be mothballed now 
-// Can be called by the user
-// #[ic_cdk::query]
-// pub fn who_am_i() -> String {
-//     let username = String::from(username());
-//     print!("You are '{}'", &username);
-//     return username;
-// }
 
 // Changes the toPrincipal to mint to /burn from as needed
 // Later we could potentially use this to iterate over a range of Principals and change the to address each time
@@ -219,72 +159,36 @@ pub fn set_to_principal(set_principal : Principal) -> Principal {
 
 fn main() {
     
-    // TLC
-//     #[ic_cdk::init]
-//     fn init() {
-//         let ledger_canister_id = Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai")
-//         .expect("Invalid ledger canister ID");
-//     let client = LedgerClient::new(ledger_canister_id);
-//     LEDGER_CLIENT.with(|rc| *rc.borrow_mut() = Some(client));
-// }
-// let actor = LiftActor { principal: Principal.from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap() };
-// let greeting = actor.greet("Alice").await;
-// println!("{}", greeting);
-
-//     icrc1_transfer : (TransferArg) -> async TransferResult;
-//     icrc1_balance_of : (Account) -> async Nat;
-//   };
-
-// async fn interact_with_ledger() -> Result<(), String> {
-    //     let ledger_canister_id = Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai")
-    //     .map_err(|e|| format!("Invalid Principal: {}", e))?;
-    // }
-
     // VARIABLES *************************************************************
     
-    // Defines the to_principal value here to make it easier to update and be used
-    // This could be done using '{ caller } / msg.caller' in the future but I haven't been able to get it to work yet
-    // Identity: Jesper
-    let hard_coded_to_principal = Principal::from_text("tog4r-6yoqs-piw5o-askmx-dwu6g-vncjf-y7gml-qnkb2-yhuao-2cq3c-2ae").expect("Oh dear");
-    // Identity: testytester
-    // let hardCodedPrincipal = Principal.fromText("stp67-22vw7-sgmm7-aqsla-64hid-auh7e-qjsxr-tr3q2-47jtb-qubd7-6qe");
+    use ic_cdk::storage;
     
     // Defines the default value of to_principal to the value of hard_coded_to_principal
-    let to_principal : Principal = hard_coded_to_principal;
+    let to_principal : Principal = Principal::from_text(INITIAL_TO_PRINCIPAL_STRING).unwrap();
     
-    // Variables needed for the auto-minting process
-    static mut MINT_TIMER: u64 = 0;
-    static mut  IS_MINTING: bool = false;
-    static mut MINT_STOP: bool = true;
-    
-    // Variables needed for the auto-burning process
-    static mut BURN_TIMER: u64 = 0;
-    static mut IS_BURNING: bool = false;
-    static mut BURN_STOP: bool = true;
+    let timer_object: TimerObject = TimerObject {
+        mint_timer: 0,
+        is_minting: false,
+        mint_stop: true,  
+        burn_timer: 0,
+        id_burning: false,
+        burn_stop: true,   
+    };
     
     // Variables to be used to set the contents of the transferArgs for mint and burn functions etc.
-    // let mut transfer_amount: Tokens = 50000;
-    // let mut transfer_fee: Tokens = 0;
+    // #[ic_cdk::storage]
+    let mut transfer_amount: Tokens = INITIAL_TRANSFER_AMOUNT;
+    let mut transfer_fee: Tokens = INITIAL_TRANSFER_FEE;
     
-    // This doesn't fucking work either
     // Get the Principal of this canister for use in burning
-    // const MINTER_PRINCIPAL_STRING: &str = "aaaaa-aa"; // Principal of the current canister
-    // static mut MINTER_PRINCIPAL: Principal = Principal::from_text(MINTER_PRINCIPAL_STRING).expect("Something went wrong");
-
-    // Of course this doesn't work because it fucks up all of the other types
-    // const MINTER_PRINCIPAL_STRING: &str = "aaaaa-aa"; // Principal of the current canister
-    // static MINTER_PRINCIPAL: LazyLock<Principal> = LazyLock::new(|| {
-    //     Principal::from_text(MINTER_PRINCIPAL_STRING).expect("Something went wrong")
-    // });
+    // static mut MINTER_PRINCIPAL: Principal = "";
+    let minter_principal: Principal = Principal::from_text("aaaaa-aa").expect("Something went wrong");
     
     // Creating the account type variable to use in the burn() function
-    // static mut MINTER_ACCOUNT: Account = Account { 
-    // owner: MINTER_PRINCIPAL,
-    // subaccount: None,
-    // };
-    
-    // JSON - This approach does not work, you cannot assign the contents of a file directly to a variable like this
-    // let testData = "./data.json";
+    let minter_account: Account = Account { 
+    owner: minter_principal,
+    subaccount: None,
+    };
     
     let new_record: JsonRecord = JsonRecord {
         proton_account: String::from("tommccann"),
@@ -308,37 +212,49 @@ fn main() {
     
     let json_record_keys = ["proton_account", "ic_principal", "amount", "date_time"];
     
-    #[ic_cdk::update]
-    pub fn set_transfer_amount(amount: u64) -> u64 {
-        unsafe {
-            TRANSFER_AMOUNT = Some(amount);
-            return TRANSFER_AMOUNT.unwrap();
-        }
-    }
+    let mut current_send_object: SendInfo = SendInfo {
+        proton_account: String::from(""),
+        ic_principal: to_principal,
+        amount: 0,
+        utc_time: 0,
+    };
 
     #[ic_cdk::query]
-    pub fn show_transfer_amount() -> u64 {
-        unsafe {
-            return TRANSFER_AMOUNT.unwrap();
-        }
+    fn get_my_struct(foo: SendInfo) -> SendInfo {
+        crate::println!("{:#?}", foo);
+        foo
     }
-
-    // Changes the fee exacted on a transaction (default is 0).
-    // Can be called by the user\
-    #[ic_cdk::update]
-    pub fn set_fee(amount: u64) -> u64 {
-        unsafe {
-            TRANSFER_FEE = Some(amount);
-            return TRANSFER_FEE.unwrap();
-        }
-    }
-
+    
     #[ic_cdk::query]
-    pub fn show_transfer_fee() -> u64 {
-        unsafe {
-            return TRANSFER_FEE.unwrap();
-        }
+    pub fn experimental(c: SendInfo) -> u64 {
+        let object_to_print = get_my_struct(&current_send_object);
+        object_to_print.amount
     }
+
+    #[ic_cdk::update]
+    pub fn set_transfer_amount(amount: u64, current_send_object: SendInfo) -> u64 {
+        current_send_object.amount = amount;
+        return current_send_object.amount;
+    }
+
+    // #[ic_cdk::query]
+    // pub fn show_transfer_amount(amount: u64) -> u64 {
+    //     let t_amount = transfer_amount;
+    //     return t_amount;
+    // }
+
+    // // Changes the fee exacted on a transaction (default is 0).
+    // // Can be called by the user
+    // #[ic_cdk::update]
+    // fn set_fee(set_amount: u64) -> u64 {
+    //     let transfer_fee: u64 = set_amount;
+    //     return transfer_fee;
+    // }
+            
+    // #[ic_cdk::query]
+    // pub fn show_transfer_fee(fee: &transfer_fee) -> u64 {
+    //     return transfer_fee;
+    // }
 
 }
 
